@@ -1,0 +1,74 @@
+#!/usr/bin/env python3
+
+import rospy
+from mavros_msgs.msg import State, PositionTarget
+from mavros_msgs.srv import SetMode, CommandBool
+from geometry_msgs.msg import PoseStamped
+
+current_state = None
+current_local_pose = PoseStamped()
+
+def state_cb(msg):
+    global current_state
+    current_state = msg
+
+def local_pose_cb(msg):
+    global current_local_pose
+    current_local_pose = msg
+
+rospy.init_node('offboard_node', anonymous=True)
+rate = rospy.Rate(20)
+
+state_sub = rospy.Subscriber('mavros/state', State, state_cb)
+local_pose_sub = rospy.Subscriber('mavros/local_position/pose', PoseStamped, local_pose_cb)
+local_pos_pub = rospy.Publisher('mavros/setpoint_raw/local', PositionTarget, queue_size=10)
+
+while not rospy.is_shutdown() and current_state is None:
+    rate.sleep()
+
+target_position = PositionTarget()
+target_position.position.x = current_local_pose.pose.position.x
+target_position.position.y = current_local_pose.pose.position.y
+target_position.position.z = current_local_pose.pose.position.z + 0.1
+target_position.coordinate_frame = PositionTarget.FRAME_LOCAL_NED
+
+for i in range(100):
+    local_pos_pub.publish(target_position)
+    rate.sleep()
+
+set_mode_srv = rospy.ServiceProxy('mavros/set_mode', SetMode)
+arm_srv = rospy.ServiceProxy('mavros/cmd/arming', CommandBool)
+
+# offboard 모드로 변환 후 드론을 arm 상태로 변환
+response = set_mode_srv(custom_mode="OFFBOARD")
+response = arm_srv(True)
+
+# end_time까지 hovering 명령
+hover_duration = rospy.Duration(5)
+end_time = rospy.Time.now() + hover_duration
+while rospy.Time.now() < end_time:
+    local_pos_pub.publish(target_position)
+    rate.sleep()
+
+# 현재 위치에서의 상대 고도
+desired_altitude = 10  # this altitude is relative to the start altitude, not above sea level
+
+while current_local_pose.pose.position.z < desired_altitude:
+    target_position.position.z += 0.1
+    local_pos_pub.publish(target_position)
+    rate.sleep()
+
+target_position.position.x += 3.0  # Change these values based on desired local move distance
+target_position.position.y += 3.0
+
+move_duration = rospy.Duration(10)
+end_time = rospy.Time.now() + move_duration
+while rospy.Time.now() < end_time:
+    local_pos_pub.publish(target_position)
+    rate.sleep()
+
+# 드론 자동 착륙 모드 설정
+set_mode_srv(custom_mode="AUTO.LAND")
+# 노드가 종료될 때까지 대기
+rospy.spin()
+
