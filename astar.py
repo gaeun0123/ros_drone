@@ -21,8 +21,20 @@ def heuristic(node, goal, D=1, D2=2 ** 0.5):  # Diagonal Distance
     dy = abs(node.position[1] - goal.position[1])
     return D * (dx + dy) + (D2 - 2 * D) * min(dx, dy)
 
+# 글로벌 위치 -> 그리드 위치 변환 함수
+def global_position_to_grid_cell(global_position, grid_size):
+    x, y = global_position
+    cell_x = int(x / grid_size)
+    cell_y = int(y / grid_size)
+    return (cell_x, cell_y)
 
-def aStar(maze, start, end):
+def aStar(maze, start_global, end_global):
+    grid_size = 0.0001
+
+    # startNode와 endNode 초기화
+    start = global_position_to_grid_cell(start_global, grid_size)
+    end = global_position_to_grid_cell(end_global, grid_size)
+
     # startNode와 endNode 초기화
     startNode = Node(None, start)
     endNode = Node(None, end)
@@ -117,21 +129,21 @@ def aStar(maze, start, end):
             openList.append(child)
 
 
-
-def main(namespace):
+def main(namespace, start_global, end_global):
     if namespace not in drone_configs:
         raise ValueError(f"No configuration found for {namespace}")
 
     config = drone_configs[namespace]
     maze = config["maze"]
-    start = config["start"]
-    end = config["end"]
 
-    path = aStar(maze, start, end)
+    path = aStar(maze, start_global, end_global)
     return path
 
 if __name__ == '__main__':
     test_namespace = "uav0"
     
-    result_path = main(test_namespace)
+    start_position = (37.7749, -122.4194)
+    end_position = (34.0522, -118.2437)
+    
+    result_path = main(test_namespace, start_position, end_position)
     print(result_path)

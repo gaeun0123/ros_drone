@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 import rospy
-from sensor_msgs.msg import NavSatFix 
+from sensor_msgs.msg import NavSatFix  # Global 위치 정보를 위한 메시지 타입
 
 def own_pose_callback(data):
     # MAVROS로부터 위치 정보를 받으면 공유 토픽에 그대로 발행
@@ -9,7 +9,7 @@ def own_pose_callback(data):
 # ROS 노드 초기화, 해당 노드를 식별하기 위한 명 : drone1_pose_sharing
 rospy.init_node('drone1_pose_sharing')
 
-# MAVROS의 위치 정보 토픽을 구독
+# MAVROS의 global 위치 정보 토픽을 구독
 rospy.Subscriber("/uav0/mavros/global_position/global", NavSatFix, own_pose_callback)
 
 # 공유 토픽에 위치 정보를 발행하기 위한 Publisher
