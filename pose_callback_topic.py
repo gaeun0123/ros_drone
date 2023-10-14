@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 import rospy
-from geometry_msgs.msg import PoseStamped
+from sensor_msgs.msg import NavSatFix 
 
 def own_pose_callback(data):
     # MAVROS로부터 위치 정보를 받으면 공유 토픽에 그대로 발행
@@ -10,10 +10,10 @@ def own_pose_callback(data):
 rospy.init_node('drone1_pose_sharing')
 
 # MAVROS의 위치 정보 토픽을 구독
-rospy.Subscriber("/uav0/mavros/local_position/pose", PoseStamped, own_pose_callback)
+rospy.Subscriber("/uav0/mavros/global_position/global", NavSatFix, own_pose_callback)
 
 # 공유 토픽에 위치 정보를 발행하기 위한 Publisher
-shared_pose_publisher = rospy.Publisher("/drone1/shared_pose", PoseStamped, queue_size=10)
+shared_pose_publisher = rospy.Publisher("/drone1/shared_pose", NavSatFix, queue_size=10)
 
 rospy.spin()
 
