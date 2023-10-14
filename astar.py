@@ -28,6 +28,14 @@ def global_position_to_grid_cell(global_position, grid_size):
     cell_y = int(y / grid_size)
     return (cell_x, cell_y)
 
+# 그리드 위치 -> 글로벌 위치 변환 함수
+# 필요 이유 : 웨이포인트 변환
+def grid_cell_to_global_position(grid_cell, grid_size):
+    cell_x, cell_y = grid_cell
+    x = cell_x * grid_size
+    y = cell_y * grid_size
+    return (x, y)
+
 def aStar(maze, start_global, end_global):
     grid_size = 0.0001
 
@@ -67,15 +75,17 @@ def aStar(maze, start_global, end_global):
         # 현재 노드가 목적지면 current.position 추가하고
         # current의 부모로 이동
         if currentNode == endNode:
-            path = []
+            grid_path = []
             current = currentNode
             while current is not None:
                 # maze 길을 표시하려면 주석 해제
                 # x, y = current.position
                 # maze[x][y] = 7 
-                path.append(current.position)
+                grid_path.append(current.position)
                 current = current.parent
-            return path[::-1]  # reverse
+            
+            global_path = [grid_cell_to_global_position(cell, grid_size) for cell in grid_path]
+            return global_path[::-1]  # reverse
 
         children = []
         # 인접한 xy좌표 전부
@@ -130,6 +140,9 @@ def aStar(maze, start_global, end_global):
 
 
 def main(namespace, start_global, end_global):
+    # drone_config.py에는 슬래쉬가 없는 채로 저장되기 때문에
+    namespace = namespace.strip('/')
+    
     if namespace not in drone_configs:
         raise ValueError(f"No configuration found for {namespace}")
 
@@ -139,11 +152,11 @@ def main(namespace, start_global, end_global):
     path = aStar(maze, start_global, end_global)
     return path
 
-if __name__ == '__main__':
-    test_namespace = "uav0"
+# if __name__ == '__main__':
+#     test_namespace = "uav0"
     
-    start_position = (37.7749, -122.4194)
-    end_position = (34.0522, -118.2437)
+#     start_position = (37.7749, -122.4194)
+#     end_position = (34.0522, -118.2437)
     
-    result_path = main(test_namespace, start_position, end_position)
-    print(result_path)
+#     result_path = main(test_namespace, start_position, end_position)
+#     print(result_path)
