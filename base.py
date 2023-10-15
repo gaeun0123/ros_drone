@@ -31,7 +31,7 @@ class MultiDroneNode:
         self.state_sub = rospy.Subscriber(self.namespace + '/mavros/state', State, self.state_cb)
         self.global_pose_sub = rospy.Subscriber(self.namespace + '/mavros/global_position/global', NavSatFix, self.global_pose_cb)
         self.global_pose_pub = rospy.Publisher(self.namespace + '/mavros/setpoint_raw/global', GlobalPositionTarget, queue_size=10)
-
+        
         self.waypoints_sub = rospy.Subscriber(self.namespace + '/mavros/mission/waypoints', WaypointList, self.waypoint_cb)
         self.arming_client = rospy.ServiceProxy(self.namespace + '/mavros/cmd/arming', CommandBool)
         self.set_mode_client = rospy.ServiceProxy(self.namespace + '/mavros/set_mode', SetMode)
@@ -57,7 +57,7 @@ class MultiDroneNode:
         
         if self.current_state.mode != "GUIDED":
             self.set_mode("GUIDED")
-        print("guided mode changed")
+        print("guided mode로 변경되었습니다.")
 
         self.arm()
         takeoff_cmd = CommandTOL()
@@ -85,6 +85,7 @@ class MultiDroneNode:
         start_global = (self.waypoints[0].x_lat, self.waypoints[0].y_long)
         end_global = (self.waypoints[-1].x_lat, self.waypoints[-1].y_long)
 
+        print("way포인트의 글로벌 값")
         print(start_global)
         print(end_global)
         
@@ -109,9 +110,9 @@ class MultiDroneNode:
             rate.sleep()  # 10Hz로 웨이포인트 발행
 
     # waypoints에 따른 미션 서비스 클라이언트 생성
-    def send_mavros_mission(waypoints):
+    def send_mavros_mission(self, waypoints):
         try:
-            service = rospy.ServiceProxy('mavros/mission/push', WaypointPush)
+            service = rospy.ServiceProxy(self.namespace + '/mavros/mission/push', WaypointPush)
             response = service(0, waypoints) # 0 is the starting waypoint
             if not response.success:
                 rospy.logerr("Failed to send waypoints to MAVROS")
@@ -122,13 +123,14 @@ class MultiDroneNode:
             return False
 
     # mission_mode로 변경하는 함수
-    def set_mission_mode():
+    def set_mission_mode(self):
         try:
-            set_mode_service = rospy.ServiceProxy('mavros/set_mode', SetMode)
+            set_mode_service = rospy.ServiceProxy(self.namespace + '/mavros/set_mode', SetMode)
             response = set_mode_service(0, "AUTO.MISSION")
             if not response.success:
                 rospy.logerr("Failed to set AUTO.MISSION mode")
                 return False
+            rospy.loginfo(response)
             return True
         except rospy.ServiceException as e:
             rospy.logerr("Service call failed: %s" % e)
@@ -145,7 +147,8 @@ if __name__ == '__main__':
     drone_namespaces = rospy.get_param("~namespaces", "").split(',')
     print("Namespaces value from parameter server:", rospy.get_param("~namespaces", "Default value"))
 
-    print("드론 객체 생성 완료" + ', '.join(drone_namespaces))
+    print("드론 객체 생성 완료")
+    print(drone_namespaces)
 
      # 각 드론의 노드 객체를 저장할 리스트 초기화
     drone_nodes = []
@@ -164,7 +167,7 @@ if __name__ == '__main__':
         for position in drone_node.path:
             wp = Waypoint()
             wp.frame = Waypoint.FRAME_GLOBAL
-            wp.command = Waypoint.NAV_WAYPOINT
+            wp.command = 16
             wp.is_current = False
             wp.autocontinue = True
             wp.param1 = 0

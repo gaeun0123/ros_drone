@@ -1,8 +1,14 @@
 # Time Complexity는 H에 따라 다르다.
 # O(b^d), where d = depth, b = 각 노드의 하위 요소 수
 # heapque를 이용하면 길을 출력할 때 reverse를 안해도 됨
+import drone_config
 from drone_config import drone_configs
 import rospy
+from geopy.distance import geodesic
+from geopy.distance import distance
+
+# 기준점 (예를 들어, 지역의 최남단과 최서단의 좌표)
+BASE_POINT = (37.7680, -119.5980)
 
 class Node:
     def __init__(self, parent=None, position=None):
@@ -23,9 +29,17 @@ def heuristic(node, goal, D=1, D2=2 ** 0.5):  # Diagonal Distance
 
 # 글로벌 위치 -> 그리드 위치 변환 함수
 def global_position_to_grid_cell(global_position, grid_size):
-    x, y = global_position
-    cell_x = int(x / grid_size)
-    cell_y = int(y / grid_size)
+    # BASE_POINT와 global_position의 위도 차이를 계산
+    distance_y = geodesic((BASE_POINT[0], BASE_POINT[1]), (global_position[0], BASE_POINT[1])).meters
+    # BASE_POINT와 global_position의 경도 차이를 계산
+    distance_x = geodesic((BASE_POINT[0], BASE_POINT[1]), (BASE_POINT[0], global_position[1])).meters
+
+    # 거리를 grid_size로 나누어 셀 좌표를 얻음
+    cell_x = int(distance_x / grid_size)
+    cell_y = int(distance_y / grid_size)
+    
+    print("global값을 grid값으로 변환합니다.")
+    print(cell_x, cell_y)
     return (cell_x, cell_y)
 
 # 그리드 위치 -> 글로벌 위치 변환 함수
@@ -34,15 +48,27 @@ def grid_cell_to_global_position(grid_cell, grid_size):
     cell_x, cell_y = grid_cell
     x = cell_x * grid_size
     y = cell_y * grid_size
-    return (x, y)
+
+    new_latitude = distance(kilometers=y/1000).destination(BASE_POINT, 0)[0]
+    new_longitude = distance(kilometers=x/1000).destination(BASE_POINT, 90)[1]
+
+    print(new_latitude, new_longitude)
+    return (new_latitude, new_longitude)
 
 def aStar(maze, start_global, end_global):
-    grid_size = 0.0001
+    grid_size = 1
+
+    print("astar 내부 글로벌 값")
+    print(start_global)
+    print(end_global)
 
     # startNode와 endNode 초기화
     start = global_position_to_grid_cell(start_global, grid_size)
     end = global_position_to_grid_cell(end_global, grid_size)
 
+    print("변경된 grid 값으로 astar 경로를 계산합니다.")
+    print(start, end)
+    
     # startNode와 endNode 초기화
     startNode = Node(None, start)
     endNode = Node(None, end)
@@ -149,8 +175,16 @@ def main(namespace, start_global, end_global):
     config = drone_configs[namespace]
     maze = config["maze"]
 
+    if not maze:
+        raise ValueError(f"No maze found for {namespace}")
+
     path = aStar(maze, start_global, end_global)
+
+    if not path:
+        raise ValueError("Path not found using A* algorithm.")
+
     return path
+
 
 # if __name__ == '__main__':
 #     test_namespace = "uav0"
