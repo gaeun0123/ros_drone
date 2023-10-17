@@ -14,6 +14,8 @@ from dp import douglas_peucker
 from drone_config import drone_configs
 from mavros_msgs.srv import WaypointPush
 from mavros_msgs.msg import Waypoint
+from mavros_msgs.srv import WaypointSetCurrent
+
 
 class MultiDroneNode:
     def __init__(self, drone_namespace):
@@ -49,7 +51,7 @@ class MultiDroneNode:
     def waypoint_cb(self, data):
         self.waypoints = data.waypoints
 
-    def takeoff(self, altitude=5.0):
+    def takeoff(self, altitude=20.0):
         print("Namespace : " + self.namespace)
         if not self.current_state:
             rospy.logwarn("Current state not yet received!")
@@ -64,6 +66,7 @@ class MultiDroneNode:
         takeoff_cmd.altitude = altitude
         self.takeoff_client(min_pitch=0, yaw=0, latitude=0, longitude=0, altitude=altitude)
 
+
     def land(self):
         self.set_mode("LAND")
 
@@ -75,7 +78,7 @@ class MultiDroneNode:
             print("Service call failed: %s" % e)
 
     def arm(self):
-        rospy.wait_for_service(self.namespace + '/mavros/cmd/arming', timeout=5)
+        rospy.wait_for_service(self.namespace + '/mavros/cmd/arming')
         try:
             self.arming_client(True)
         except rospy.ServiceException as e:
@@ -92,23 +95,6 @@ class MultiDroneNode:
         # 웨이포인트의 첫 지점과 마지막 지점을 출발지, 목적지로 설정 후 astar 알고리즘 경로 찾기
         self.path = astar_main(self.namespace, start_global, end_global)
 
-    def publish_waypoints(self):
-        # 경로가 없을 경우
-        if not self.path:
-            rospy.logerr("Path is empty or None. Cannot publish waypoints.")
-            return
-        
-        rate = rospy.Rate(10)  # 10hz
-        for position in self.path:
-            waypoint = GlobalPositionTarget()
-            waypoint.latitude = position[0]
-            waypoint.longitude = position[1]
-
-            waypoint.coordinate_frame = 6
-
-            self.global_pose_pub.publish(waypoint)
-            rate.sleep()  # 10Hz로 웨이포인트 발행
-
     # waypoints에 따른 미션 서비스 클라이언트 생성
     def send_mavros_mission(self, waypoints):
         try:
@@ -122,19 +108,74 @@ class MultiDroneNode:
             rospy.logerr("Service call failed: %s" % e)
             return False
 
-    # mission_mode로 변경하는 함수
-    def set_mission_mode(self):
-        try:
-            set_mode_service = rospy.ServiceProxy(self.namespace + '/mavros/set_mode', SetMode)
-            response = set_mode_service(0, "AUTO.MISSION")
+    def fly_along_path(self):
+        mavros_waypoints = self.convert_path_to_mavros_waypoints(self.path)
+
+        # 변환된 웨이포인트를 MAVROS에 전송합니다.
+        if not self.send_mavros_mission(mavros_waypoints):
+            rospy.logerr("Failed to send waypoints to MAVROS.")
+            return
+
+        # AUTO.MISSION 모드로 변경합니다.
+        if not self.set_mission_mode():
+            rospy.logerr("Failed to set AUTO.MISSION mode.")
+            return
+
+        # 첫 번째 웨이포인트를 시작점으로 설정하고 미션을 시작합니다.
+        if not self.start_mission():
+            rospy.logerr("Failed to start the mission from the first waypoint.")
+            return
+
+        rospy.loginfo("Mission started. Drone is flying along the path.")
+
+
+    
+    def start_mission(self):
+        try :
+            # 시작 웨이포인트를 설정합니다. 여기서는 첫 웨이포인트를 시작점으로 합니다.
+            set_waypoint_service = rospy.ServiceProxy(self.namespace + '/mavros/mission/set_current', WaypointSetCurrent)
+            response = set_waypoint_service(0)  # 첫 번째 웨이포인트를 시작점으로 설정
             if not response.success:
-                rospy.logerr("Failed to set AUTO.MISSION mode")
+                rospy.logerr("Failed to set start waypoint")
                 return False
-            rospy.loginfo(response)
             return True
         except rospy.ServiceException as e:
             rospy.logerr("Service call failed: %s" % e)
             return False
+
+    # mission모드로 변환  
+    def set_mission_mode(self):
+        try:
+            set_mode_service = rospy.ServiceProxy(self.namespace + '/mavros/set_mode', SetMode)
+            response = set_mode_service(0, "AUTO.MISSION")
+            if not response.mode_sent: # `mode_sent`는 `SetMode` 서비스의 응답 필드 중 하나입니다.
+                rospy.logerr("Failed to set AUTO.MISSION mode")
+                return False
+            return True
+        except rospy.ServiceException as e:
+            rospy.logerr("Service call failed: %s" % e)
+            return False
+    
+    # 경로를 waypoints로 변환
+    def convert_path_to_mavros_waypoints(self, path, altitude=20.0):
+        mavros_waypoints = []
+
+        for position in path:
+            wp = Waypoint()
+            wp.frame = Waypoint.FRAME_GLOBAL
+            wp.command = 16  # MAV_CMD_NAV_WAYPOINT
+            wp.is_current = False
+            wp.autocontinue = True
+            wp.param1 = 0  # 홀드 시간
+            wp.param2 = 0  # 허용 편차
+            wp.param3 = 0  # 패스 스토리지 (여기서는 사용하지 않음)
+            wp.param4 = 0  # 요구 각도 (여기서는 사용하지 않음)
+            wp.x_lat = position[0]
+            wp.y_long = position[1]
+            wp.z_alt = altitude
+            mavros_waypoints.append(wp)
+
+        return mavros_waypoints
     
 # 실행 파일로 실행될 경우 name은 main으로 설정
 # import 파일로 사용되어질 경우에는 name이 해당 스크립트 파일 명으로 변경
@@ -161,26 +202,8 @@ if __name__ == '__main__':
         drone_node.takeoff()
         rospy.sleep(5)  # takeoff 후에 약간의 대기 시간
         drone_node.plan_path_with_astar()
-        drone_node.publish_waypoints()
-        
-        mavros_waypoints = []
-        for position in drone_node.path:
-            wp = Waypoint()
-            wp.frame = Waypoint.FRAME_GLOBAL
-            wp.command = 16
-            wp.is_current = False
-            wp.autocontinue = True
-            wp.param1 = 0
-            wp.param2 = 0
-            wp.param3 = 0
-            wp.param4 = 0
-            wp.x_lat = position[0]
-            wp.y_long = position[1]
-            wp.z_alt = 20.0  # altitude (고도)는 필요에 따라 조정
-            mavros_waypoints.append(wp)
-
-        if drone_node.send_mavros_mission(mavros_waypoints):
-            drone_node.set_mission_mode()
+        drone_node.fly_along_path()
+        print("비행완료")
     
     # ROS 노드를 실행 상태로 유지하며 메시지 계속 수신하도록 함
     rospy.spin()
