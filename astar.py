@@ -1,20 +1,23 @@
-# Time Complexity는 H에 따라 다르다.
-# O(b^d), where d = depth, b = 각 노드의 하위 요소 수
-# heapque를 이용하면 길을 출력할 때 reverse를 안해도 됨
-import drone_config
-from drone_config import drone_configs
-import rospy
-from geopy.distance import geodesic
-from geopy.distance import distance
+#!/usr/bin/env python3
 
-# 기준점 (예를 들어, 지역의 최남단과 최서단의 좌표)
-BASE_POINT = (37.7680, -119.5980)
+import rospy
+from std_msgs.msg import String 
+from drone_config import drone_configs as config
+import drone_config 
+
+class AStarNode:
+    def __init__(self, namespace):
+        self.namespace = namespace
+        self.publisher = rospy.Publisher(f"{self.namespace}/astar_path", String, queue_size=10)
+        
+    def publish_path(self, path):
+        path_str = ",".join(map(str, path))
+        self.publisher.publish(path_str)
 
 class Node:
     def __init__(self, parent=None, position=None):
         self.parent = parent
         self.position = position
-
         self.g = 0
         self.h = 0
         self.f = 0
@@ -22,175 +25,96 @@ class Node:
     def __eq__(self, other):
         return self.position == other.position
 
-def heuristic(node, goal, D=1, D2=2 ** 0.5):  # Diagonal Distance
-    dx = abs(node.position[0] - goal.position[0])
-    dy = abs(node.position[1] - goal.position[1])
-    return D * (dx + dy) + (D2 - 2 * D) * min(dx, dy)
+# 설정 경로 시각화 함수
+def print_grid(grid, closed_list, path):
+    for i in range(len(grid)):
+        row = ""
+        for j in range(len(grid[i])):
+            if (i, j) in closed_list:
+                row += "C "  # C represents closed nodes
+            elif (i, j) in path:
+                row += "P "  # P represents path nodes
+            else:
+                row += str(grid[i][j]) + " "
+        print(row)
+    print("\n")
 
-# 글로벌 위치 -> 그리드 위치 변환 함수
-def global_position_to_grid_cell(global_position, grid_size):
-    # BASE_POINT와 global_position의 위도 차이를 계산
-    distance_y = geodesic((BASE_POINT[0], BASE_POINT[1]), (global_position[0], BASE_POINT[1])).meters
-    # BASE_POINT와 global_position의 경도 차이를 계산
-    distance_x = geodesic((BASE_POINT[0], BASE_POINT[1]), (BASE_POINT[0], global_position[1])).meters
+# 경로 알고리즘
+def astar(grid, start, end):
+    start_node = Node(None, start)
+    start_node.g = start_node.h = start_node.f = 0
+    end_node = Node(None, end)
+    end_node.g = end_node.h = end_node.f = 0
 
-    # 거리를 grid_size로 나누어 셀 좌표를 얻음
-    cell_x = int(distance_x / grid_size)
-    cell_y = int(distance_y / grid_size)
-    
-    print("global값을 grid값으로 변환합니다.")
-    print(cell_x, cell_y)
-    return (cell_x, cell_y)
+    open_list = []
+    closed_list = []
+    open_list.append(start_node)
 
-# 그리드 위치 -> 글로벌 위치 변환 함수
-# 필요 이유 : 웨이포인트 변환
-def grid_cell_to_global_position(grid_cell, grid_size):
-    cell_x, cell_y = grid_cell
-    x = cell_x * grid_size
-    y = cell_y * grid_size
+    while len(open_list) > 0:
+        current_node = open_list[0]
+        current_index = 0
+        for index, item in enumerate(open_list):
+            if item.f < current_node.f:
+                current_node = item
+                current_index = index
 
-    new_latitude = distance(kilometers=y/1000).destination(BASE_POINT, 0)[0]
-    new_longitude = distance(kilometers=x/1000).destination(BASE_POINT, 90)[1]
+        open_list.pop(current_index)
+        closed_list.append(current_node)
 
-    print(new_latitude, new_longitude)
-    return (new_latitude, new_longitude)
-
-def aStar(maze, start_global, end_global):
-    grid_size = 1
-
-    print("astar 내부 글로벌 값")
-    print(start_global)
-    print(end_global)
-
-    # startNode와 endNode 초기화
-    start = global_position_to_grid_cell(start_global, grid_size)
-    end = global_position_to_grid_cell(end_global, grid_size)
-
-    print("변경된 grid 값으로 astar 경로를 계산합니다.")
-    print(start, end)
-    
-    # startNode와 endNode 초기화
-    startNode = Node(None, start)
-    endNode = Node(None, end)
-
-    # openList, closedList 초기화
-    openList = []
-    closedList = []
-
-    # openList에 시작 노드 추가
-    openList.append(startNode)
-
-    # endNode를 찾을 때까지 실행
-    while openList:
-
-        # 현재 노드 지정
-        currentNode = openList[0]
-        currentIdx = 0
-
-        # 이미 같은 노드가 openList에 있고, f 값이 더 크면
-        # currentNode를 openList안에 있는 값으로 교체
-        for index, item in enumerate(openList):
-            if item.f < currentNode.f:
-                currentNode = item
-                currentIdx = index
-
-        # openList에서 제거하고 closedList에 추가
-        openList.pop(currentIdx)
-        closedList.append(currentNode)
-
-        # 현재 노드가 목적지면 current.position 추가하고
-        # current의 부모로 이동
-        if currentNode == endNode:
-            grid_path = []
-            current = currentNode
+        if current_node == end_node:
+            path = []
+            current = current_node
             while current is not None:
-                # maze 길을 표시하려면 주석 해제
-                # x, y = current.position
-                # maze[x][y] = 7 
-                grid_path.append(current.position)
+                path.append(current.position)
                 current = current.parent
-            
-            global_path = [grid_cell_to_global_position(cell, grid_size) for cell in grid_path]
-            return global_path[::-1]  # reverse
+            return path[::-1]
 
         children = []
-        # 인접한 xy좌표 전부
-        for newPosition in [(0, -1), (0, 1), (-1, 0), (1, 0), (-1, -1), (-1, 1), (1, -1), (1, 1)]:
+        for new_position in [(0, -1), (0, 1), (-1, 0), (1, 0), (-1, -1), (-1, 1), (1, -1), (1, 1)]:
+            node_position = (current_node.position[0] + new_position[0], current_node.position[1] + new_position[1])
 
-            # 노드 위치 업데이트
-            nodePosition = (
-                currentNode.position[0] + newPosition[0],  # X
-                currentNode.position[1] + newPosition[1])  # Y
-                
-            # 미로 maze index 범위 안에 있어야함
-            within_range_criteria = [
-                nodePosition[0] > (len(maze) - 1),
-                nodePosition[0] < 0,
-                nodePosition[1] > (len(maze[len(maze) - 1]) - 1),
-                nodePosition[1] < 0,
-            ]
-
-            if any(within_range_criteria):  # 하나라도 true면 범위 밖임
+            if node_position[0] > (len(grid) - 1) or node_position[0] < 0 or node_position[1] > (len(grid[len(grid) - 1]) - 1) or node_position[1] < 0:
                 continue
 
-            # 장애물이 있으면 다른 위치 불러오기
-            if maze[nodePosition[0]][nodePosition[1]] != 0:
+            if grid[node_position[0]][node_position[1]] != 0:
                 continue
 
-            new_node = Node(currentNode, nodePosition)
+            new_node = Node(current_node, node_position)
             children.append(new_node)
 
-        # 자식들 모두 loop
         for child in children:
-
-            # 자식이 closedList에 있으면 continue
-            if child in closedList:
+            if len([closed_child for closed_child in closed_list if closed_child == child]) > 0:
                 continue
 
-            # f, g, h값 업데이트
-            child.g = currentNode.g + 1
-            # child.h = ((child.position[0] - endNode.position[0]) **
-            #            2) + ((child.position[1] - endNode.position[1]) ** 2)
-            child.h = heuristic(child, endNode)
-            # print("position:", child.position) 거리 추정 값 보기
-            # print("from child to goal:", child.h)
-            
+            child.g = current_node.g + 1
+            child.h = ((child.position[0] - end_node.position[0]) ** 2) + ((child.position[1] - end_node.position[1]) ** 2)
             child.f = child.g + child.h
 
-            # 자식이 openList에 있으고, g값이 더 크면 continue
-            if len([openNode for openNode in openList
-                    if child == openNode and child.g > openNode.g]) > 0:
+            if len([open_node for open_node in open_list if child.position == open_node.position and child.g >= open_node.g]) > 0:
                 continue
-                    
-            openList.append(child)
 
+            open_list.append(child)
 
-def main(namespace, start_global, end_global):
-    # drone_config.py에는 슬래쉬가 없는 채로 저장되기 때문에
+def main(namespace):
     namespace = namespace.strip('/')
+
+    uav_config = config.get(namespace)
     
-    if namespace not in drone_configs:
-        raise ValueError(f"No configuration found for {namespace}")
+    if not uav_config:
+        raise KeyError(f"No configuration found for namespace: {namespace}")
 
-    config = drone_configs[namespace]
-    maze = config["maze"]
+    maze = uav_config["maze"]
+    start = uav_config["start"]
+    end = uav_config["end"]
 
-    if not maze:
-        raise ValueError(f"No maze found for {namespace}")
-
-    path = aStar(maze, start_global, end_global)
-
-    if not path:
-        raise ValueError("Path not found using A* algorithm.")
-
-    return path
-
-
-# if __name__ == '__main__':
-#     test_namespace = "uav0"
+    path = astar(maze, start, end)
     
-#     start_position = (37.7749, -122.4194)
-#     end_position = (34.0522, -118.2437)
+    # 수정된 경로
+    return path  
+
+if __name__ == '__main__':
+    rospy.init_node('astar_node')
+    namespace = rospy.get_param("~namespace", "")
     
-#     result_path = main(test_namespace, start_position, end_position)
-#     print(result_path)
+    astar_node = AStarNode(namespace)
+    print(main(namespace))
