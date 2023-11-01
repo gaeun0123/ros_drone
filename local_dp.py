@@ -1,21 +1,17 @@
 #!/usr/bin/env python3
 
 import rospy
-import modified_astar as astar
-from modified_astar import main
+import astar
+from astar import main
 import dp
 from mavros_msgs.msg import State, PositionTarget
 from mavros_msgs.srv import SetMode, CommandBool
 from geometry_msgs.msg import PoseStamped
 from dp import douglas_peucker
 import test
-from modified_astar import calculate_distance
-from modified_astar import recalculation_path
 
 current_state = None
 current_local_pose = PoseStamped()
-CRITICAL = 5.0
-drone_position = {}
 
 def state_cb(msg):
     global current_state
@@ -27,21 +23,6 @@ def local_pose_cb(msg):
     
 def distance(a, b):
     return ((a.pose.position.x - b.position.x)**2 + (a.pose.position.y - b.position.y)**2)**0.5
-
-# ... 통신 ... #
-def position_callback(msg, drone_name):
-    # 위치 정보 저장
-    global drone_positions
-    drone_positions[drone_name] = msg.pose.position
-
-    for other_drone_id, other_position in drone_positions.items():
-        # drone_name과 다른 드론 간의 거리 계산
-        if other_drone_id != drone_name:
-            distance = calculate_distance(msg.pose.position, other_position)
-            if distance < CRITICAL:
-                rospy.loginfo(f"드론 {drone_name}과 드론 {other_drone_id}간의 충돌 위험. 거리 : {distance}")
-                # 경로 재탐색 함수 호출. drone_name과 드론의 현재 위치 전송
-                recalculation_path(drone_name, msg.pose.position)
 
 
 rospy.init_node('offboard_node', anonymous=True)
@@ -98,7 +79,7 @@ a = astar.main(namespace)
 epsilon = 0.5  # 높은 값은 더 단순한 경로를 생성, 낮은 값은 더 복잡한 경로를 유지
 simplified_path = douglas_peucker(a, epsilon)
 
-for point in a:
+for point in simplified_path:
     target_position.position.x = point[0]  # x와 y 좌표를 직접 설정
     target_position.position.y = point[1]
 
@@ -110,30 +91,3 @@ for point in a:
 set_mode_srv(custom_mode="AUTO.LAND")
 # 노드가 종료될 때까지 대기
 rospy.spin()
-
-
-
-def main():
-    rospy.init_node('drone_control_node')
-
-    drone_namespaces = ['/uav0', '/uav1']
-    drone_positions = {}
-
-    subscribers = []
-    publishers = {}
-
-    for ns in drone_namespaces:
-        # 각 드론의 위치 정보를 받는 서브스크라이버 생성
-        sub = rospy.Subscriber(f'{ns}/position', PoseStamped, position_callback, ns)
-        subscribers.append(sub)
-
-        # 각 드론의 위치 정보를 퍼블리시하는 퍼블리셔 생성
-        pub = rospy.Publisher(f'{ns}/position', PoseStamped, queue_size=10)
-        publishers[ns] = pub
-
-    # ROS 노드가 종료될 때까지 계속 실행
-    rospy.spin()
-
-
-if __name__ == '__main__':
-    main()
