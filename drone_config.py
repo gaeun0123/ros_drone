@@ -1,4 +1,5 @@
 import numpy as np
+import rospy
 
 def expand_obstacles(obstacles, padding=2, grid_size=200):
     expanded_obstacles = set()
@@ -40,7 +41,6 @@ obstacles = [(16,16),(16,17),(16,18),(16,19),(16,20),(16,21),(16,22),(16,23),(16
 center_adjusted_obstacles = adjust_obstacles_to_center(obstacles, grid_size=200)
 maze_200x200 = expand_maze_zero_filled(center_adjusted_obstacles, grid_size=200)
 
-# 중앙 기준 좌표계로 드론 구성 수정
 drone_configs = {
     "uav0": {
         "maze": maze_200x200,

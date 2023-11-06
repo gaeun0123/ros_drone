@@ -6,14 +6,7 @@ from drone_config import drone_configs as config
 import drone_config 
 from math import sqrt
 
-class AStarNode:
-    def __init__(self, namespace):
-        self.namespace = namespace
-        self.publisher = rospy.Publisher(f"{self.namespace}/astar_path", String, queue_size=10)
-        
-    def publish_path(self, path):
-        path_str = ",".join(map(str, path))
-        self.publisher.publish(path_str)
+CRITICAL = 5.0
 
 class Node:
     def __init__(self, parent=None, position=None):
@@ -40,12 +33,30 @@ def print_grid(grid, closed_list, path):
         print(row)
     print("\n")
 
-# 두 드론 간의 유클라디안 거리를 계산하는 함수
+# 드론 간 거리 계산 함수
 def calculate_distance(point1, point2):
-    return sqrt((point1.x - point2.x)**2 + (point1.y - point2.y)**2 + (point1.z - point2.z)**2)
+    return sqrt((point1.x - point2.x) ** 2 + (point1.y - point2.y) ** 2)
+
+# 임계 구역에 따른 maze 수정 함수
+def set_critical_areas(maze, drone_positions, current_pose, critical_distance):
+    critical_areas = []
+    # current_pose : Pose 타입의 객체
+    current_pose = (current_pose.position.x, current_pose.position.y)
+
+    for _, other_pose in drone_positions.values():
+        # other_pose : Pose 타입의 객체
+        other_position = (other_pose.position.x, other_pose.position.y)
+        
+        if calculate_distance(current_pose.position, other_pose.position) < critical_distance:
+            x, y = int(other_position[0]), int(other_position[1])
+            if 0 <= x < 200 and 0 <= y < 200:  # 미로 범위 체크
+                maze[y][x] = 1  # 장애물 표시, [y][x]=(x,y)
+                # 임계 구역에 추가
+                critical_areas.append((y, x))
+    return maze
 
 # 경로 재계산 함수
-def recalculation_path(namespace, current_position):
+def recalculation_path(namespace, current_position, other_drone_positions):
     namespace = namespace.strip('/')
 
     uav_config = config.get(namespace)
@@ -58,13 +69,12 @@ def recalculation_path(namespace, current_position):
     end = uav_config["end"]
     maze = uav_config["maze"]
 
+    # 임계 구역 설정
+    maze = set_critical_areas(maze, other_drone_positions, current_position, CRITICAL)
+
     # 수정된 위치로부터 경로 재계산
     new_path = astar(maze, start, end)
-
-    astar_node = AStarNode(namespace)
-    astar_node.publish_path(new_path)
     return new_path
-
 
 # 경로 알고리즘
 def astar(grid, start, end):
@@ -125,25 +135,3 @@ def astar(grid, start, end):
                 continue
 
             open_list.append(child)
-
-# def main(namespace):
-#     namespace = namespace.strip('/')
-
-#     uav_config = config.get(namespace)
-    
-#     if not uav_config:
-#         raise KeyError(f"No configuration found for namespace: {namespace}")
-
-#     maze = uav_config["maze"]
-#     start = uav_config["start"]
-#     end = uav_config["end"]
-
-#     path = astar(maze, start, end)
-    
-#     # 수정된 경로
-#     return path  
-
-if __name__ == '__main__':
-    rospy.init_node('astar_node')
-    namespace = rospy.get_param("~namespace", "")
-    
