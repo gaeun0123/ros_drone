@@ -88,7 +88,7 @@ def astar(grid, start, end):
     open_list.append(start_node)
 
     while len(open_list) > 0:
-        current_node = open_list[0]
+        current_node = open_list[0] 
         current_index = 0
         for index, item in enumerate(open_list):
             if item.f < current_node.f:

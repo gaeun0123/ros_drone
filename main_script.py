@@ -2,7 +2,7 @@
 
 import rospy
 import astar
-from astar import main
+import modified_astar as astar
 import dp
 from mavros_msgs.msg import State, PositionTarget
 from mavros_msgs.srv import SetMode, CommandBool
@@ -120,6 +120,7 @@ while current_local_pose.pose.position.z < desired_altitude:
 threshold_distance = 0.2 
 
 a = astar.main(namespace)
+
 
 # Douglas-Peucker 알고리즘으로 경로 단순화
 epsilon = 0.5  # 높은 값은 더 단순한 경로를 생성, 낮은 값은 더 복잡한 경로를 유지

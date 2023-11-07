@@ -6,22 +6,28 @@ from std_msgs.msg import Empty
 import modified_astar
 from drone_config import drone_configs as config
 from mavros_msgs.srv import CommandBool, SetMode
+from geometry_msgs.msg import PoseStamped
+from mavros_msgs.msg import State
 
 namespace = rospy.get_namespace().strip('/')
 other_drone_positions = {} # 다른 드론의 위치
+current_state = None
 current_local_pose = None  # 현재 드론의 위치
 path = []  # 현재 계산된 경로
 threshold_distance = 1.0  # 목적지 도착 판단 임계값
 CRITICAL_DISTANCE = 5.0  # 다른 드론과의 안전한 거리 임계값
-other_drones = ['drone1', 'drone2']
 
 # 퍼블리셔, 서브스크라이버 정의
-local_pos_pub = rospy.Publisher(f"{namespace}/setpoint_position/local", Pose, queue_size=10)
-takeoff_pub = rospy.Publisher(f"{namespace}/takeoff", Empty, queue_size=10)
-land_pub = rospy.Publisher(f"{namespace}/land", Empty, queue_size=10)
+local_pos_pub = rospy.Publisher(f"/{namespace}/mavros/setpoint_position/local", PoseStamped, queue_size=10)
+takeoff_pub = rospy.Publisher(f"/{namespace}/takeoff", Empty, queue_size=10)
+land_pub = rospy.Publisher(f"/{namespace}/land", Empty, queue_size=10)
 
-arming_client = rospy.ServiceProxy(f"{namespace}/mavros/cmd/arming", CommandBool)
-set_mode_client = rospy.ServiceProxy(f"{namespace}/mavros/set_mode", SetMode)
+arming_client = rospy.ServiceProxy(f"/{namespace}/mavros/cmd/arming", CommandBool)
+set_mode_client = rospy.ServiceProxy(f"/{namespace}/mavros/set_mode", SetMode)
+
+def state_cb(msg):
+    global current_state
+    current_state = msg
 
 def pose_callback(msg):
     global current_local_pose
@@ -29,21 +35,29 @@ def pose_callback(msg):
 
 def other_drone_pose_callback(msg):
     global other_drone_positions
-    other_drone_positions['uav0'] = msg
+    other_drone_positions['uav0'] = msg.pose
 
 # 드론 시동
 def set_arm_state(arm, timeout):
     rospy.loginfo(f"{'Arming' if arm else 'Disarming'} the drone")
     for _ in range(timeout):
-        if arming_client(arm).success:
-            rospy.loginfo("드론 시동 준비 완료")
-            return True
+        try:
+            response = arming_client(arm)
+            if response.success: 
+                rospy.loginfo("드론 시동 준비 완료")
+                return True
+            else:
+                rospy.logwarn("드론 시동에 실패했습니다: %s", str(response.result))
+                return False
+        except rospy.ServiceException as e:
+            rospy.logerr("서비스 호출 중 예외가 발생했습니다: %s", e)
         rospy.sleep(1)
+    rospy.logerr("드론 시동 시도가 타임아웃 되었습니다.")
     return False
 
 # 모드 변환
 def set_flight_mode(mode, timeout):
-    rospy.loginfo(f"Setting flight mode to {mode}")
+    rospy.loginfo(f"{mode} 모드로 변환 준비합니다.")
     for _ in range(timeout):
         try:
             response = set_mode_client(custom_mode=mode)
@@ -129,18 +143,8 @@ def check_flight_readiness(timeout):
     return False
 
 def main():
-    # 서브스크라이버 정의
-    rospy.Subscriber(f"{namespace}/local_position/pose", Pose, pose_callback)
-    rospy.Subscriber("/uav0/local_position/pose", Pose, other_drone_pose_callback)
-
-    '''
-    main
-    '''
     # 초기 경로 계산
     calculate_path()
-
-    # 드론 상태 실시간 체크
-    rate = rospy.Rate(10)  # 10Hz
 
     while not rospy.is_shutdown():
         if modified_astar.calculate_distance(current_local_pose.position, Pose(Point(*config.get(namespace)["end"]), None).position) <= threshold_distance:
@@ -160,11 +164,24 @@ if __name__ == '__main__':
     try:
         # ROS node 초기화
         rospy.init_node('drone_control_node', anonymous=True)
+        
+        # rospy.loginfo(f"현재 namespace : {namespace}")
+
+        # 서브스크라이버 정의
+        rospy.Subscriber(f"/{namespace}/mavros/local_position/pose", PoseStamped, pose_callback)
+        rospy.Subscriber("/uav0/mavros/local_position/pose", PoseStamped, other_drone_pose_callback)
+        rospy.Subscriber(f"/{namespace}/mavros/state", State, state_cb)
+
+        # # 첫 메시지를 기다림 (예: 10초간)
+        # rospy.wait_for_message(f"/{namespace}/mavros/local_position/pose", PoseStamped, timeout=10)
 
         # 비행 준비 상태 확인
         if not check_flight_readiness(10):
             rospy.loginfo("비행 준비 상태 확인 실패")
-            sys.exit(0)  # 비행 준비 상태가 아니면 프로그램 종료
+            sys.exit(0)
+
+        # 드론 상태 실시간 체크
+        rate = rospy.Rate(20)  # 10Hz
 
         # 모드 OFFBOARD로 전환
         if set_flight_mode("OFFBOARD", 5):
