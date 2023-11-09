@@ -1,26 +1,23 @@
 #!/usr/bin/env python3
 
 import rospy
-import astar
-import modified_astar as astar
-import dp
-from mavros_msgs.msg import State, PositionTarget
+from modified_astar import astar as cal_path
+from mavros_msgs.msg import PositionTarget, State
 from mavros_msgs.srv import SetMode, CommandBool
 from geometry_msgs.msg import PoseStamped
 from dp import douglas_peucker
-import test
 import drone_config
 from geometry_msgs.msg import Pose, Point
 from modified_astar import calculate_distance as cal_dis
 from modified_astar import recalculation_path as recal_path
 from nav_msgs.msg import Path
+import threading
 
-
+path = []
+path_lock = threading.Lock()
 current_state = None
 current_local_pose = PoseStamped()
-global land_publishers, path_publishers, drone_positions
-land_publishers = {}
-path_publishers = {} 
+global drone_positions
 drone_positions = {}
 CRITICAL = 5.0
 
@@ -35,41 +32,58 @@ def local_pose_cb(msg):
 def distance(a, b):
     return ((a.pose.position.x - b.position.x)**2 + (a.pose.position.y - b.position.y)**2)**0.5
 
-def get_current_pose():
-    pass
-
 def position_callback(msg, drone_name):
-    # 위치 정보 저장
+    global drone_positions, current_local_pose, path, path_lock
+
+    # drone_name = 'uav0'으로 지정, 의 위치 정보 msg.pose.position 저장
     drone_positions[drone_name] = msg.pose.position
-    destination = drone_config.get_drone_destination(drone_name)
 
-    # drone_positions에서 다른 드론 정보 추출
-    other_drone_positions = {name: pos for name, pos in drone_positions.items() if name != drone_name}
+    with path_lock:
+        if current_local_pose is not None and drone_name in drone_positions:
+            other_position = drone_positions[drone_name]
+            distance = cal_dis(current_local_pose, other_position)
 
-    for other_drone_id, other_position in other_drone_positions.items():
-        # drone_name과 다른 드론 간의 거리 계산
-        if other_drone_id != drone_name:
-            distance = cal_dis(msg.pose.position, other_position)
+            # distance가 임계값 이하일 경우, 경로 재계산
             if distance < CRITICAL:
-                rospy.loginfo(f"드론 {drone_name}과 드론 {other_drone_id}간의 충돌 위험. 거리 : {distance}")
-
-                # 임계값 이하일 경우 경로 재계산
-                new_path = recal_path(drone_name, msg.pose.position, other_drone_positions)
+                rospy.loginfo(f"uav1과 드론 {drone_name}간의 충돌 위험. 거리 : {distance}")
+                rospy.loginfo(f"uav1의 경로를 재계산 합니다.")
+                path = recal_path('uav1', current_local_pose, other_position)
 
                 # 새 경로를 Path 메시지로 변환
                 path_msg = Path()
                 path_msg.header.stamp = rospy.Time.now()
                 path_msg.header.frame_id = "world"
 
-                for pose in new_path:
+                for pose in path:
                     pose_stamped = PoseStamped()
-                    pose_stamped.header = path_msg.head 
+                    pose_stamped.header = path_msg.header
                     pose_stamped.pose.position.x = pose[0]
                     pose_stamped.pose.position.y = pose[1]
                     path_msg.poses.append(pose_stamped)
 
                 # 계산된 새 경로를 발행
-                path_publishers[drone_name].publish(path_msg)
+                local_pos_pub.publish(path_msg)
+
+
+# # 정해진 경로를 따라 이동 후 착륙
+# def follow_path():
+#     global path, current_local_pose, target_position, local_pos_pub, rate
+#     # 실시간으로 경로를 따라 이동해야 하기 때문에 while문으로 진행
+#     while not rospy.is_shutdown():
+#         for point in path:
+#             target_position.position.x = point[0]
+#             target_position.position.y = point[1]
+
+#             # target_position으로 이동 명령
+#             local_pos_pub.publish(target_position)
+
+#             # 드론이 목표 위치에 도달할 때까지 rate.sleep()
+#             while(distance(current_local_pose, target_position) >= threshold_distance):
+#                 rate.sleep()
+        
+#         # 목적지 도착시 착륙
+#         set_mode_srv(custom_mode="AUTO.LAND")
+#         break
 
 rospy.init_node('offboard_node', anonymous=True)
 
@@ -119,22 +133,47 @@ while current_local_pose.pose.position.z < desired_altitude:
 
 threshold_distance = 0.2 
 
-a = astar.main(namespace)
+namespace = namespace.strip('/')
+rospy.loginfo(f"초기 고도 : {desired_altitude} 로 설정되었습니다.")
 
+uav_config = drone_config.drone_configs[namespace]
 
-# Douglas-Peucker 알고리즘으로 경로 단순화
-epsilon = 0.5  # 높은 값은 더 단순한 경로를 생성, 낮은 값은 더 복잡한 경로를 유지
-simplified_path = douglas_peucker(a, epsilon)
+start = uav_config["start"]
+end = uav_config["end"]
+maze = uav_config["maze"]
 
-for point in a:
-    target_position.position.x = point[0]  # x와 y 좌표를 직접 설정
-    target_position.position.y = point[1]
+try : 
+    path = cal_path(maze, start, end)
+    if not path:
+        raise ValueError("path를 찾을 수 없습니다.")
+except ValueError as ve:
+    print(f"오류 : {ve}")
+except Exception as e:
+    print(f"알고리즘 실행 도중 오류 : {e}")
 
-    while distance(current_local_pose, target_position) > threshold_distance:
-        local_pos_pub.publish(target_position)
-        rate.sleep()
+if path:
+    print("path 검색 SUCCESS!", path)
+else:
+    print("path 검색 FAIL!")
+
+# # Douglas-Peucker 알고리즘, 경로 단순화
+# epsilon = 0.5 
+# simplified_path = douglas_peucker(path, epsilon)
+
+# other_drone = 'uav0'
+# other_pose_sub = rospy.Subscriber('/' + other_drone + '/mavros/local_position/pose', PoseStamped, position_callback, other_drone)
+
+with path_lock:
+    for point in path:
+        target_position.position.x = point[0]  
+        target_position.position.y = point[1]
+
+        while distance(current_local_pose, target_position) > threshold_distance:
+            local_pos_pub.publish(target_position)
+            rate.sleep()
 
 # 드론 자동 착륙 모드 설정
 set_mode_srv(custom_mode="AUTO.LAND")
+
 # 노드가 종료될 때까지 대기
 rospy.spin()
