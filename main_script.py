@@ -11,10 +11,8 @@ from geometry_msgs.msg import Pose, Point
 from modified_astar import calculate_distance as cal_dis
 from modified_astar import recalculation_path as recal_path
 from nav_msgs.msg import Path
-import threading
 
 path = []
-path_lock = threading.Lock()
 current_state = None
 current_local_pose = PoseStamped()
 global drone_positions
@@ -29,42 +27,44 @@ def local_pose_cb(msg):
     global current_local_pose
     current_local_pose = msg
     
-def distance(a, b):
+def distance2(a, b):
     return ((a.pose.position.x - b.position.x)**2 + (a.pose.position.y - b.position.y)**2)**0.5
 
 def position_callback(msg, drone_name):
-    global drone_positions, current_local_pose, path, path_lock
+    global drone_positions, current_local_pose, path
+
+    # # 통신 : 다른 드론 위치 데이터
+    # rospy.loginfo(f"Received {drone_name} position: {msg.pose.position}")
+
+    # # 드론 위치 데이터
+    # rospy.loginfo(f"Current local pose: {current_local_pose.pose.position}")
 
     # drone_name = 'uav0'으로 지정, 의 위치 정보 msg.pose.position 저장
     drone_positions[drone_name] = msg.pose.position
 
-    with path_lock:
-        if current_local_pose is not None and drone_name in drone_positions:
-            other_position = drone_positions[drone_name]
-            distance = cal_dis(current_local_pose, other_position)
+    if current_local_pose is not None and drone_name in drone_positions:
+        other_position = drone_positions[drone_name]
 
-            # distance가 임계값 이하일 경우, 경로 재계산
-            if distance < CRITICAL:
-                rospy.loginfo(f"uav1과 드론 {drone_name}간의 충돌 위험. 거리 : {distance}")
-                rospy.loginfo(f"uav1의 경로를 재계산 합니다.")
-                path = recal_path('uav1', current_local_pose, other_position)
+        distance = cal_dis(current_local_pose.pose.position, other_position)
 
-                # 새 경로를 Path 메시지로 변환
-                path_msg = Path()
-                path_msg.header.stamp = rospy.Time.now()
-                path_msg.header.frame_id = "world"
+        # distance가 임계값 이하일 경우, 경로 재계산
+        if distance < CRITICAL:
+            rospy.loginfo(f"{current_local_pose.pose.position}")
+            rospy.loginfo(f"{other_position}")
+            rospy.loginfo(f"uav1과 드론 {drone_name}간의 충돌 위험. 거리 : {distance}")
+            rospy.loginfo(f"uav1의 경로를 재계산 합니다.")
+            new_target = recal_path('uav1', current_local_pose.pose.position, other_position)
 
-                for pose in path:
-                    pose_stamped = PoseStamped()
-                    pose_stamped.header = path_msg.header
-                    pose_stamped.pose.position.x = pose[0]
-                    pose_stamped.pose.position.y = pose[1]
-                    path_msg.poses.append(pose_stamped)
+            # 새로운 목표 PositionTarget 생성
+            target_position = PositionTarget()
+            target_position.header.stamp = rospy.Time.now()
+            target_position.header.frame_id = "world"
 
-                # 계산된 새 경로를 발행
-                local_pos_pub.publish(path_msg)
+            target_position.position.x =  new_target[0]
+            target_position.position.y = new_target[1]
 
-
+            local_pos_pub.publish(target_position)
+        
 # # 정해진 경로를 따라 이동 후 착륙
 # def follow_path():
 #     global path, current_local_pose, target_position, local_pos_pub, rate
@@ -160,17 +160,17 @@ else:
 # epsilon = 0.5 
 # simplified_path = douglas_peucker(path, epsilon)
 
-# other_drone = 'uav0'
-# other_pose_sub = rospy.Subscriber('/' + other_drone + '/mavros/local_position/pose', PoseStamped, position_callback, other_drone)
+other_drone = 'uav0'
+other_pose_sub = rospy.Subscriber('/' + other_drone + '/mavros/local_position/pose', PoseStamped, position_callback, other_drone)
 
-with path_lock:
-    for point in path:
-        target_position.position.x = point[0]  
-        target_position.position.y = point[1]
+# target_position : Posestamped 객체
+for point in path:
+    target_position.position.x = point[0]  
+    target_position.position.y = point[1]
 
-        while distance(current_local_pose, target_position) > threshold_distance:
-            local_pos_pub.publish(target_position)
-            rate.sleep()
+    while distance2(current_local_pose, target_position) > threshold_distance:
+        local_pos_pub.publish(target_position)
+        rate.sleep()
 
 # 드론 자동 착륙 모드 설정
 set_mode_srv(custom_mode="AUTO.LAND")

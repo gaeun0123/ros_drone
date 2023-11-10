@@ -48,7 +48,7 @@ drone_configs = {
     "uav0": {
         "maze": maze_200x200,
         "start": (0, 0),
-        "end": (90, 90)
+        "end": (10, 10)
     },
     "uav1": {
         "maze": maze_200x200,

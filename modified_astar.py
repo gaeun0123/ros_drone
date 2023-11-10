@@ -40,25 +40,17 @@ def calculate_distance(point1, point2):
 # 임계 구역에 따른 maze 수정 함수
 def set_critical_areas(maze, drone_positions, current_pose, critical_distance):
     critical_areas = []
-    # current_pose : Pose 타입의 객체
-    current_pose = (current_pose.position.x, current_pose.position.y)
 
-    for _, other_pose in drone_positions.values():
-        # other_pose : Pose 타입의 객체
-        other_position = (other_pose.position.x, other_pose.position.y)
-        
-        if calculate_distance(current_pose.position, other_pose.position) < critical_distance:
-            x, y = int(other_position[0]), int(other_position[1])
-            if 0 <= x < 200 and 0 <= y < 200:  # 미로 범위 체크
-                maze[y][x] = 1  # 장애물 표시, [y][x]=(x,y)
-                # 임계 구역에 추가
-                critical_areas.append((y, x))
+    if calculate_distance(current_pose, drone_positions) < critical_distance:
+        x, y = int(drone_positions.x), int(drone_positions.y)
+        if 0 <= x < 200 and 0 <= y < 200:  # 미로 범위 체크
+            maze[y][x] = 1  # 장애물 표시, [y][x]=(x,y)
+            # 임계 구역에 추가
+            critical_areas.append((y, x))
     return maze
 
 # 경로 재계산 함수
 def recalculation_path(namespace, current_position, other_drone_positions):
-    namespace = namespace.strip('/')
-
     uav_config = config.get(namespace)
 
     if not uav_config:
@@ -74,6 +66,7 @@ def recalculation_path(namespace, current_position, other_drone_positions):
 
     # 수정된 위치로부터 경로 재계산
     new_path = astar(maze, start, end)
+    rospy.loginfo(f"새로운 경로 : {new_path}")
     return new_path
 
 # 경로 알고리즘
